@@ -1,0 +1,2 @@
+This is a small GPT2 model I created to understand the Transformer Architecture. 
+it can be used as a streamlit App with adjustable max token generation (limited to 100) and setting temperature, as well as Sampling.

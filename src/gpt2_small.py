@@ -2,9 +2,7 @@ import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from numpy.conftest import dtype
-
-from config import GPTSettings
+from src.config import GPTSettings
 
 
 class GPT2(nn.Module):
@@ -29,14 +27,14 @@ class GPT2(nn.Module):
         batch, length = idx.size()
         assert length <= self.config.block_size, "Sequence length exceeds block size"
 
-        pos = torch.arrange(0, length, dtype=torch.long, device=idx.device).unsqueeze(0)
+        pos = torch.arange(0, length, dtype=torch.long, device=idx.device).unsqueeze(0)
 
         x = self.wte(idx) + self.wpe(pos)
         x = self.drop(x)
         for block in self.h:
             x = block(x)
         x = self.ln_f(x)
-        logits = self.lm_head(self.ln_f(x))
+        logits = self.lm_head(x)
 
         loss = None
         if targets is not None:
@@ -47,7 +45,7 @@ class GPT2(nn.Module):
     @torch.no_grad()
     def generate(self, idx, max_new_tokens=50, temperature=1.0, top_k=None):
         for _ in range(max_new_tokens):
-            idx_cond = idx[:, self.config.block_size]
+            idx_cond = idx[:, -self.config.block_size:]
             logits, _ = self(idx_cond)
             logits = logits[:, -1, :] / max(temperature, 1e-8)
 
@@ -62,32 +60,13 @@ class GPT2(nn.Module):
         return idx
 
 
-class SingleHeadSelfAttention(nn.Module):
-    def __init__(self, config: GPTSettings):
-        super().__init__()
-        self.c_attn = nn.Linear(config.n_dim, 3 * config.n_dim, bias=False)
-
-    def forward(self, x):
-        batch, length, dim = x.size()
-
-        qkv = self.c_attn(x)
-        q, k, v = qkv.split(dim, dim=2)
-
-
-        scaled_scores = (q @ k.transpose(-2, -1)) / math.sqrt(k.size(-1))
-        attention_weights = F.softmax(scaled_scores, dim= -1)
-
-        output = attention_weights @ v
-
-        return output
-
 class CausalSelfAttention(nn.Module):
     def __init__(self, config: GPTSettings):
         super().__init__()
         assert config.n_dim % config.n_head == 0 # ensure there is not remainder
         self.n_head = config.n_head
         self.n_dim = config.n_dim
-        self.c_attn = nn.Linear(config.n_dim, 3 * config.n_dim, bias=False)
+        self.c_attn = nn.Linear(config.n_dim, 3 * config.n_dim, bias=True)
         self.register_buffer(
             name='bias',
             tensor= torch.tril(torch.ones(config.block_size, config.block_size))
@@ -122,7 +101,7 @@ class CausalSelfAttention(nn.Module):
 class MLP(nn.Module):
     def __init__(self, config: GPTSettings):
         super().__init__()
-        self.fc = nn.Linear(config.n_dim, 4 & config.n_dim)
+        self.fc = nn.Linear(config.n_dim, 4 * config.n_dim)
         self.proj = nn.Linear(4 * config.n_dim, config.n_dim)
         self.drop = nn.Dropout(config.dropout)
 
@@ -144,3 +123,4 @@ class Block(nn.Module):
     def forward(self, x):
         x = x + self.attn(self.ln1(x))
         x = x + self.mlp(self.ln2(x))
+        return x
